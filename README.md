@@ -18,7 +18,7 @@ A Fusion 360 add-in that generates Voronoi lightening hole patterns on flat face
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/fusion360-voronoi-pattern.git
+   git clone https://github.com/nori-ut3g/fusion360-voronoi-pattern.git
    ```
 
 2. Copy or symlink the `VoronoiPattern` folder to your Fusion 360 add-ins directory:

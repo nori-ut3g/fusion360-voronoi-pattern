@@ -18,7 +18,7 @@
 
 1. リポジトリをクローン:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/fusion360-voronoi-pattern.git
+   git clone https://github.com/nori-ut3g/fusion360-voronoi-pattern.git
    ```
 
 2. `VoronoiPattern` フォルダを Fusion 360 のアドインディレクトリにコピーまたはシンボリックリンク:
