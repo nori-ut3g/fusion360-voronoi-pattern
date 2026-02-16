@@ -132,9 +132,8 @@ def bowyer_watson(points):
 
         # Create new triangles from boundary edges to the new point
         for e in boundary_edges:
-            new_tri = (idx, e[0], e[1])
-            # Normalize triangle vertex order
-            new_tri = tuple(sorted(new_tri))
+            verts = sorted((idx, e[0], e[1]))
+            new_tri = (verts[0], verts[1], verts[2])
             triangles.append(new_tri)
 
             p1 = all_points[new_tri[0]]
@@ -160,9 +159,6 @@ def delaunay_to_voronoi(points, triangles, all_points):
         (polygon, ordered CCW).
     """
     n = len(points)
-    n_super = len(all_points) - 3
-    super_indices = {n_super, n_super + 1, n_super + 2}
-
     # Build mapping: point index -> list of triangles containing it
     point_to_triangles = defaultdict(list)
     for tri in triangles:
@@ -183,13 +179,6 @@ def delaunay_to_voronoi(points, triangles, all_points):
     voronoi_cells = {}
     for idx in range(n):
         tris = point_to_triangles[idx]
-
-        # Skip if any adjacent triangle uses super triangle vertices
-        has_super = False
-        for tri in tris:
-            if any(v in super_indices for v in tri):
-                has_super = True
-                break
 
         # Collect circumcenters of adjacent triangles
         centers = []
@@ -225,9 +214,6 @@ def compute_voronoi(seeds, boundary_bbox):
         return [None] * len(seeds)
 
     min_x, min_y, max_x, max_y = boundary_bbox
-    width = max_x - min_x
-    height = max_y - min_y
-
     # Add mirror points to ensure boundary cells close properly
     mirror_points = []
     for sx, sy in seeds:
