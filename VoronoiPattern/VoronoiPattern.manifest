@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "voronoi-pattern-generator",
+  "author": "",
+  "description": {
+    "": "Generate Voronoi lightening hole patterns on sheet metal faces"
+  },
+  "version": "1.0.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
