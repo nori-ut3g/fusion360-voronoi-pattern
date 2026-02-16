@@ -179,7 +179,13 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 clipped = clip_polygon_to_boundary(clipped, boundary)
                 if len(clipped) < 3:
                     continue
-                processed_cells.append(clipped)
+                # Apply offset for rib width
+                offset = offset_polygon(clipped, rib_width / 2.0)
+                if offset is None:
+                    continue
+                if abs(polygon_area(offset)) < 0.005:
+                    continue
+                processed_cells.append(offset)
 
             _log(f'results: {len(processed_cells)} cells')
 
@@ -187,7 +193,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 ui.messageBox('No cells generated. Try reducing edge margin.')
                 return
 
-            draw_voronoi_pattern(sketch, processed_cells, 0)
+            draw_voronoi_pattern(sketch, processed_cells, corner_radius)
 
             ui.messageBox(f'Generated {len(processed_cells)} Voronoi cells.\n'
                           f'Use Extrude Cut to create the holes.')

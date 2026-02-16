@@ -158,100 +158,50 @@ def clip_polygon(polygon, clip_rect):
 def offset_polygon(polygon, distance):
     """Offset (shrink) a polygon inward by the given distance.
 
-    Each edge is shifted inward along its normal by `distance`.
-    Adjacent shifted edges are intersected to form new vertices.
+    Scales the polygon toward its centroid so that the minimum
+    distance from centroid to edges decreases by `distance`.
+    This approach never produces self-intersections.
 
     Args:
-        polygon: List of (x, y) tuples (CCW winding).
+        polygon: List of (x, y) tuples.
         distance: Offset distance (positive = inward).
 
     Returns:
         Offset polygon as list of (x, y) tuples, or None if
-        the polygon collapses (self-intersects).
+        the polygon collapses.
     """
     n = len(polygon)
     if n < 3:
         return None
 
-    # Ensure CCW winding
-    if polygon_area(polygon) < 0:
-        polygon = list(reversed(polygon))
+    area = abs(polygon_area(polygon))
+    if area < 1e-12:
+        return None
 
-    # Compute inward-shifted edges
-    shifted_edges = []
+    cx, cy = polygon_centroid(polygon)
+
+    # Compute perimeter
+    perimeter = 0.0
     for i in range(n):
         x1, y1 = polygon[i]
         x2, y2 = polygon[(i + 1) % n]
-        dx = x2 - x1
-        dy = y2 - y1
-        length = math.sqrt(dx * dx + dy * dy)
-        if length < 1e-12:
-            continue
-        # Inward normal for CCW polygon: (-dy, dx) / length
-        nx = -dy / length
-        ny = dx / length
-        shifted_edges.append((
-            x1 + nx * distance, y1 + ny * distance,
-            x2 + nx * distance, y2 + ny * distance,
-        ))
+        perimeter += math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-    if len(shifted_edges) < 3:
+    if perimeter < 1e-12:
         return None
 
-    # Intersect adjacent shifted edges to find new vertices
-    new_polygon = []
-    m = len(shifted_edges)
-    for i in range(m):
-        ax1, ay1, ax2, ay2 = shifted_edges[i]
-        bx1, by1, bx2, by2 = shifted_edges[(i + 1) % m]
-
-        dax = ax2 - ax1
-        day = ay2 - ay1
-        dbx = bx2 - bx1
-        dby = by2 - by1
-
-        denom = dax * dby - day * dbx
-        if abs(denom) < 1e-12:
-            # Parallel edges — use midpoint of shared region
-            new_polygon.append(((ax2 + bx1) / 2, (ay2 + by1) / 2))
-            continue
-
-        t = ((bx1 - ax1) * dby - (by1 - ay1) * dbx) / denom
-        ix = ax1 + t * dax
-        iy = ay1 + t * day
-        new_polygon.append((ix, iy))
-
-    # Check if the result is valid
-    if len(new_polygon) < 3:
+    # Approximate inradius: 2 * area / perimeter
+    inradius = 2.0 * area / perimeter
+    if inradius <= distance:
         return None
 
-    result_area = polygon_area(new_polygon)
-    if result_area <= 0:
-        return None
+    scale = (inradius - distance) / inradius
 
-    original_area = polygon_area(polygon)
-    if result_area > original_area * 1.01:
-        return None
+    result = []
+    for x, y in polygon:
+        result.append((cx + (x - cx) * scale, cy + (y - cy) * scale))
 
-    # Verify offset edges haven't crossed by checking that each new edge
-    # direction is consistent with the corresponding original edge.
-    # New edge i (from vertex i to i+1) lies on shifted_edge[(i+1)%m],
-    # which should be parallel to original edge (i+1)%n.
-    for i in range(m):
-        orig_i = (i + 1) % n
-        ox1, oy1 = polygon[orig_i]
-        ox2, oy2 = polygon[(orig_i + 1) % n]
-        odx, ody = ox2 - ox1, oy2 - oy1
-
-        nx1, ny1 = new_polygon[i]
-        nx2, ny2 = new_polygon[(i + 1) % m]
-        ndx, ndy = nx2 - nx1, ny2 - ny1
-
-        # Dot product should be positive (same direction)
-        if odx * ndx + ody * ndy < 0:
-            return None
-
-    return new_polygon
+    return result
 
 
 def round_corners(polygon, radius):
