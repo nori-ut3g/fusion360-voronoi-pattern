@@ -2,7 +2,7 @@
   "seed_count": 40,
   "min_rib_width": 3.0,
   "edge_margin": 5.0,
-  "corner_radius": 1.0,
+  "corner_radius": 0.0,
   "random_seed": 42,
   "density_gradient": true
 }

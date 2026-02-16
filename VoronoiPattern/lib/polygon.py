@@ -129,6 +129,151 @@ def clip_polygon_by_edge(polygon, x1, y1, x2, y2):
     return output
 
 
+def _seg_intersect(ax, ay, bx, by, cx, cy, dx, dy):
+    """Segment-segment intersection.
+
+    Returns (t, ix, iy) where t is parameter along a->b, or None.
+    """
+    dabx, daby = bx - ax, by - ay
+    dcdx, dcdy = dx - cx, dy - cy
+    denom = dabx * dcdy - daby * dcdx
+    if abs(denom) < 1e-12:
+        return None
+    t = ((cx - ax) * dcdy - (cy - ay) * dcdx) / denom
+    s = ((cx - ax) * daby - (cy - ay) * dabx) / denom
+    eps = 1e-10
+    if -eps <= t <= 1 + eps and -eps <= s <= 1 + eps:
+        t = max(0.0, min(1.0, t))
+        return (t, ax + t * dabx, ay + t * daby)
+    return None
+
+
+def clip_polygon_to_boundary(polygon, boundary):
+    """Clip polygon to an arbitrary (possibly concave) boundary polygon.
+
+    Uses vertex classification and edge-boundary intersection rather
+    than Sutherland-Hodgman, which fails for concave boundaries.
+
+    Args:
+        polygon: List of (x, y) tuples to clip.
+        boundary: List of (x, y) tuples defining the clipping boundary.
+
+    Returns:
+        Clipped polygon as list of (x, y) tuples.
+    """
+    n_poly = len(polygon)
+    n_bound = len(boundary)
+
+    if n_poly < 3 or n_bound < 3:
+        return []
+
+    # Classify polygon vertices
+    poly_inside = [point_in_polygon(p, boundary) for p in polygon]
+
+    if all(poly_inside):
+        return list(polygon)
+    if not any(poly_inside):
+        return []
+
+    def find_all_ix(p1, p2):
+        """All intersections of segment p1-p2 with boundary edges.
+        Returns [(t, (ix,iy), bound_edge_idx)] sorted by t."""
+        ixs = []
+        x1, y1 = p1
+        x2, y2 = p2
+        for j in range(n_bound):
+            bx1, by1 = boundary[j]
+            bx2, by2 = boundary[(j + 1) % n_bound]
+            r = _seg_intersect(x1, y1, x2, y2, bx1, by1, bx2, by2)
+            if r:
+                t, ix, iy = r
+                ixs.append((t, (ix, iy), j))
+        ixs.sort()
+        # Remove near-duplicate intersections (adjacent boundary edges)
+        cleaned = []
+        for ix in ixs:
+            if not cleaned or \
+               (ix[1][0] - cleaned[-1][1][0]) ** 2 + \
+               (ix[1][1] - cleaned[-1][1][1]) ** 2 > 1e-10:
+                cleaned.append(ix)
+        return cleaned
+
+    def walk_boundary(exit_bedge, entry_bedge):
+        """Walk boundary between exit and entry edges.
+        Returns boundary vertices inside the polygon."""
+        fwd_count = (entry_bedge - exit_bedge) % n_bound
+        bwd_count = (exit_bedge - entry_bedge) % n_bound
+
+        if fwd_count <= bwd_count:
+            verts = []
+            be = (exit_bedge + 1) % n_bound
+            for _ in range(fwd_count):
+                verts.append(boundary[be])
+                be = (be + 1) % n_bound
+        else:
+            verts = []
+            be = exit_bedge
+            for _ in range(bwd_count):
+                verts.append(boundary[be])
+                be = (be - 1) % n_bound
+
+        return [v for v in verts if point_in_polygon(v, polygon)]
+
+    # Build result by walking polygon edges
+    result = []
+    last_exit_bedge = None
+
+    for i in range(n_poly):
+        j = (i + 1) % n_poly
+        curr_in = poly_inside[i]
+        next_in = poly_inside[j]
+        ixs = find_all_ix(polygon[i], polygon[j])
+
+        if curr_in:
+            result.append(polygon[i])
+
+        if curr_in and not next_in:
+            # Exiting boundary
+            if ixs:
+                result.append(ixs[0][1])
+                last_exit_bedge = ixs[0][2]
+
+        elif not curr_in and next_in:
+            # Entering boundary
+            if ixs:
+                entry_bedge = ixs[-1][2]
+                if last_exit_bedge is not None:
+                    result.extend(walk_boundary(last_exit_bedge, entry_bedge))
+                    last_exit_bedge = None
+                result.append(ixs[-1][1])
+
+        elif not curr_in and not next_in and len(ixs) >= 2:
+            # Edge passes through boundary (both endpoints outside)
+            for k in range(0, len(ixs) - 1, 2):
+                entry_bedge = ixs[k][2]
+                if last_exit_bedge is not None:
+                    result.extend(
+                        walk_boundary(last_exit_bedge, entry_bedge))
+                result.append(ixs[k][1])
+                result.append(ixs[k + 1][1])
+                last_exit_bedge = ixs[k + 1][2]
+
+    # Remove near-duplicate points
+    if len(result) < 3:
+        return []
+    cleaned = [result[0]]
+    for p in result[1:]:
+        if (p[0] - cleaned[-1][0]) ** 2 + \
+           (p[1] - cleaned[-1][1]) ** 2 > 1e-12:
+            cleaned.append(p)
+    # Also check last vs first
+    if len(cleaned) >= 2 and \
+       (cleaned[-1][0] - cleaned[0][0]) ** 2 + \
+       (cleaned[-1][1] - cleaned[0][1]) ** 2 < 1e-12:
+        cleaned.pop()
+    return cleaned if len(cleaned) >= 3 else []
+
+
 def clip_polygon(polygon, clip_rect):
     """Clip polygon to a rectangle using Sutherland-Hodgman algorithm.
 
