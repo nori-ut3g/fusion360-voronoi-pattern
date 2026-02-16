@@ -187,9 +187,9 @@ def offset_polygon(polygon, distance):
         length = math.sqrt(dx * dx + dy * dy)
         if length < 1e-12:
             continue
-        # Inward normal for CCW polygon: (dy, -dx) / length
-        nx = dy / length
-        ny = -dx / length
+        # Inward normal for CCW polygon: (-dy, dx) / length
+        nx = -dy / length
+        ny = dx / length
         shifted_edges.append((
             x1 + nx * distance, y1 + ny * distance,
             x2 + nx * distance, y2 + ny * distance,
@@ -221,7 +221,7 @@ def offset_polygon(polygon, distance):
         iy = ay1 + t * day
         new_polygon.append((ix, iy))
 
-    # Check if the result is valid (positive area and no self-intersection)
+    # Check if the result is valid
     if len(new_polygon) < 3:
         return None
 
@@ -229,10 +229,27 @@ def offset_polygon(polygon, distance):
     if result_area <= 0:
         return None
 
-    # Simple self-intersection check: if area shrunk too much, reject
     original_area = polygon_area(polygon)
     if result_area > original_area * 1.01:
         return None
+
+    # Verify offset edges haven't crossed by checking that each new edge
+    # direction is consistent with the corresponding original edge.
+    # New edge i (from vertex i to i+1) lies on shifted_edge[(i+1)%m],
+    # which should be parallel to original edge (i+1)%n.
+    for i in range(m):
+        orig_i = (i + 1) % n
+        ox1, oy1 = polygon[orig_i]
+        ox2, oy2 = polygon[(orig_i + 1) % n]
+        odx, ody = ox2 - ox1, oy2 - oy1
+
+        nx1, ny1 = new_polygon[i]
+        nx2, ny2 = new_polygon[(i + 1) % m]
+        ndx, ndy = nx2 - nx1, ny2 - ny1
+
+        # Dot product should be positive (same direction)
+        if odx * ndx + ody * ndy < 0:
+            return None
 
     return new_polygon
 
