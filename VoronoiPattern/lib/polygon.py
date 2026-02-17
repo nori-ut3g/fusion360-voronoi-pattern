@@ -181,9 +181,23 @@ def clip_polygon_to_boundary(polygon, boundary):
         ixs = []
         x1, y1 = p1
         x2, y2 = p2
+        # AABB of the polygon edge for fast rejection
+        seg_min_x = min(x1, x2)
+        seg_max_x = max(x1, x2)
+        seg_min_y = min(y1, y2)
+        seg_max_y = max(y1, y2)
         for j in range(n_bound):
             bx1, by1 = boundary[j]
             bx2, by2 = boundary[(j + 1) % n_bound]
+            # AABB rejection: skip if bounding boxes don't overlap
+            if max(bx1, bx2) < seg_min_x - 1e-9:
+                continue
+            if min(bx1, bx2) > seg_max_x + 1e-9:
+                continue
+            if max(by1, by2) < seg_min_y - 1e-9:
+                continue
+            if min(by1, by2) > seg_max_y + 1e-9:
+                continue
             r = _seg_intersect(x1, y1, x2, y2, bx1, by1, bx2, by2)
             if r:
                 t, ix, iy = r
@@ -217,6 +231,9 @@ def clip_polygon_to_boundary(polygon, boundary):
                 verts.append(boundary[be])
                 be = (be - 1) % n_bound
 
+        # Short walks are almost always entirely inside; skip expensive check
+        if len(verts) <= 5:
+            return verts
         return [v for v in verts if point_in_polygon(v, polygon)]
 
     # Build result by walking polygon edges
@@ -513,9 +530,23 @@ def clip_polygon_outside(polygon, hole):
         ixs = []
         x1, y1 = p1
         x2, y2 = p2
+        # AABB of the polygon edge for fast rejection
+        seg_min_x = min(x1, x2)
+        seg_max_x = max(x1, x2)
+        seg_min_y = min(y1, y2)
+        seg_max_y = max(y1, y2)
         for j in range(n_hole):
             hx1, hy1 = hole[j]
             hx2, hy2 = hole[(j + 1) % n_hole]
+            # AABB rejection
+            if max(hx1, hx2) < seg_min_x - 1e-9:
+                continue
+            if min(hx1, hx2) > seg_max_x + 1e-9:
+                continue
+            if max(hy1, hy2) < seg_min_y - 1e-9:
+                continue
+            if min(hy1, hy2) > seg_max_y + 1e-9:
+                continue
             r = _seg_intersect(x1, y1, x2, y2, hx1, hy1, hx2, hy2)
             if r:
                 t, ix, iy = r
@@ -546,6 +577,9 @@ def clip_polygon_outside(polygon, hole):
                 verts.append(hole[he])
                 he = (he - 1) % n_hole
 
+        # Short walks are almost always entirely inside; skip expensive check
+        if len(verts) <= 5:
+            return verts
         return [v for v in verts if point_in_polygon(v, polygon)]
 
     result = []

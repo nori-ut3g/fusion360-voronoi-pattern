@@ -19,32 +19,42 @@ def _simplify_cell(cell, min_edge_len):
     When boundary clipping creates tiny edges, they split what should
     be a single corner into two vertices. Merging them back produces
     cleaner geometry for filleting.
+
+    Uses a two-pass linear algorithm instead of iterative while-loop
+    to avoid O(n^2) behavior with many short edges.
     """
-    import math
-    result = list(cell)
-    changed = True
-    while changed and len(result) >= 3:
-        changed = False
-        new_result = []
-        n = len(result)
-        skip = set()
-        for i in range(n):
-            if i in skip:
-                continue
-            j = (i + 1) % n
-            x1, y1 = result[i]
-            x2, y2 = result[j]
-            edge_len = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-            if edge_len < min_edge_len and len(result) - len(skip) > 3:
-                # Keep the vertex with the sharper angle (more important corner)
-                # For simplicity, keep vertex i and skip j
-                new_result.append(result[i])
-                skip.add(j)
-                changed = True
-            else:
-                new_result.append(result[i])
-        result = new_result
-    return result
+    n = len(cell)
+    if n < 4:
+        return list(cell)
+
+    threshold_sq = min_edge_len * min_edge_len
+
+    # Pass 1: mark vertices to remove (skip vertex j when edge i->j is short)
+    keep = [True] * n
+    removed = 0
+    for i in range(n):
+        if not keep[i]:
+            continue
+        j = (i + 1) % n
+        if not keep[j]:
+            continue
+        x1, y1 = cell[i]
+        x2, y2 = cell[j]
+        if (x2 - x1) ** 2 + (y2 - y1) ** 2 < threshold_sq:
+            if n - removed > 3:
+                keep[j] = False
+                removed += 1
+
+    result = [cell[i] for i in range(n) if keep[i]]
+
+    # Pass 2: handle wrap-around edge (last -> first) that pass 1 may miss
+    if len(result) > 3:
+        x1, y1 = result[-1]
+        x2, y2 = result[0]
+        if (x2 - x1) ** 2 + (y2 - y1) ** 2 < threshold_sq:
+            result.pop()
+
+    return result if len(result) >= 3 else list(cell)
 
 
 def draw_voronoi_pattern(sketch, cells, corner_radius):
@@ -64,7 +74,7 @@ def draw_voronoi_pattern(sketch, cells, corner_radius):
                 continue
 
             if corner_radius > 0:
-                cell = _simplify_cell(cell, corner_radius * 1.0)
+                cell = _simplify_cell(cell, max(corner_radius, 0.01))
                 if len(cell) < 3:
                     continue
                 segments = round_corners(cell, corner_radius)
@@ -84,6 +94,8 @@ def _draw_segments(sketch, segments):
     """
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
+    # Cache Point3D.create to avoid repeated attribute lookups
+    create_pt = adsk.core.Point3D.create
 
     for seg in segments:
         if seg['type'] == 'line':
@@ -91,9 +103,9 @@ def _draw_segments(sketch, segments):
             dy = seg['y2'] - seg['y1']
             if dx * dx + dy * dy < 1e-10:
                 continue
-            pt1 = adsk.core.Point3D.create(seg['x1'], seg['y1'], 0)
-            pt2 = adsk.core.Point3D.create(seg['x2'], seg['y2'], 0)
-            lines.addByTwoPoints(pt1, pt2)
+            lines.addByTwoPoints(
+                create_pt(seg['x1'], seg['y1'], 0),
+                create_pt(seg['x2'], seg['y2'], 0))
         elif seg['type'] == 'arc':
             x1, y1 = seg['x1'], seg['y1']
             mx, my = seg['mx'], seg['my']
@@ -105,13 +117,12 @@ def _draw_segments(sketch, segments):
             cross = (mx - x1) * (y2 - y1) - (my - y1) * (x2 - x1)
             if abs(cross) < 1e-8:
                 # Nearly straight — draw as line
-                pt1 = adsk.core.Point3D.create(x1, y1, 0)
-                pt2 = adsk.core.Point3D.create(x2, y2, 0)
-                lines.addByTwoPoints(pt1, pt2)
+                lines.addByTwoPoints(
+                    create_pt(x1, y1, 0), create_pt(x2, y2, 0))
                 continue
-            pt1 = adsk.core.Point3D.create(x1, y1, 0)
-            mid = adsk.core.Point3D.create(mx, my, 0)
-            pt2 = adsk.core.Point3D.create(x2, y2, 0)
+            pt1 = create_pt(x1, y1, 0)
+            mid = create_pt(mx, my, 0)
+            pt2 = create_pt(x2, y2, 0)
             arc = arcs.addByThreePoints(pt1, mid, pt2)
             if arc is None:
                 # Arc creation failed — fall back to straight line
@@ -121,13 +132,12 @@ def _draw_segments(sketch, segments):
 def _draw_straight_cell(sketch, cell):
     """Draw a cell as a closed polyline (straight edges only)."""
     lines = sketch.sketchCurves.sketchLines
+    create_pt = adsk.core.Point3D.create
     n = len(cell)
     for i in range(n):
         x1, y1 = cell[i]
         x2, y2 = cell[(i + 1) % n]
-        pt1 = adsk.core.Point3D.create(x1, y1, 0)
-        pt2 = adsk.core.Point3D.create(x2, y2, 0)
-        lines.addByTwoPoints(pt1, pt2)
+        lines.addByTwoPoints(create_pt(x1, y1, 0), create_pt(x2, y2, 0))
 
 
 def get_face_boundary(face, sketch):

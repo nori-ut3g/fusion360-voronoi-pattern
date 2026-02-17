@@ -155,8 +155,27 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             wide_rect = (min_x - margin, min_y - margin,
                          max_x + margin, max_y + margin)
 
+            # Progress dialog for UI responsiveness and cancellation
+            progress = ui.createProgressDialog()
+            progress.cancelButtonText = 'Cancel'
+            progress.isBackgroundTranslucent = False
+            progress.isCancelButtonShown = True
+            n_cells = len(cells)
+            progress.show('Voronoi Pattern',
+                          'Processing cells...', 0, n_cells + 1, 0)
+
             processed_cells = []
-            for cell in cells:
+            for cell_idx, cell in enumerate(cells):
+                # Update progress and check cancellation every 5 cells
+                if cell_idx % 5 == 0:
+                    if progress.wasCancelled:
+                        progress.hide()
+                        return
+                    progress.progressValue = cell_idx
+                    progress.message = (f'Processing cell {cell_idx + 1}'
+                                        f' of {n_cells}')
+                    adsk.doEvents()
+
                 if cell is None:
                     continue
                 # First: rough clip to wide bounding box
@@ -189,19 +208,34 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             _log(f'Generated {len(processed_cells)} cells from {len(seeds)} seeds')
 
             if not processed_cells:
+                progress.hide()
                 ui.messageBox('No cells generated. Try reducing edge margin.')
                 return
 
+            progress.message = 'Drawing pattern...'
+            progress.progressValue = n_cells
+            adsk.doEvents()
+
             draw_voronoi_pattern(sketch, processed_cells, corner_radius)
+
+            progress.hide()
 
             ui.messageBox(f'Generated {len(processed_cells)} Voronoi cells.\n'
                           f'Use Extrude Cut to create the holes.')
 
         except Exception:
             _log(f'Execute handler ERROR: {traceback.format_exc()}')
-            app = adsk.core.Application.get()
-            app.userInterface.messageBox(
-                f'Error generating pattern:\n{traceback.format_exc()}')
+            try:
+                app = adsk.core.Application.get()
+                # Hide progress dialog if it was shown
+                try:
+                    progress.hide()
+                except Exception:
+                    pass
+                app.userInterface.messageBox(
+                    f'Error generating pattern:\n{traceback.format_exc()}')
+            except Exception:
+                pass
 
 
 class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):

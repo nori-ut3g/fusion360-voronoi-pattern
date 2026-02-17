@@ -81,13 +81,14 @@ def bowyer_watson(points):
     sp1, sp2, sp3 = _make_super_triangle(points)
     all_points = list(points) + [sp1, sp2, sp3]
 
-    # Initial triangle is the super triangle
-    triangles = [(n, n + 1, n + 2)]
+    # Use a set for O(1) triangle removal instead of O(n) list rebuild
+    initial_tri = (n, n + 1, n + 2)
+    triangles = {initial_tri}
     # Cache circumcircles: triangle tuple -> (cx, cy, r_sq)
     cc_cache = {}
     cc = circumcircle(sp1, sp2, sp3)
     if cc:
-        cc_cache[(n, n + 1, n + 2)] = cc
+        cc_cache[initial_tri] = cc
 
     for idx in range(n):
         px, py = all_points[idx]
@@ -95,14 +96,13 @@ def bowyer_watson(points):
         # Find all triangles whose circumcircle contains the new point
         bad_triangles = []
         for tri in triangles:
-            key = tri
-            if key not in cc_cache:
+            if tri not in cc_cache:
                 p1 = all_points[tri[0]]
                 p2 = all_points[tri[1]]
                 p3 = all_points[tri[2]]
-                cc_cache[key] = circumcircle(p1, p2, p3)
+                cc_cache[tri] = circumcircle(p1, p2, p3)
 
-            cc_val = cc_cache[key]
+            cc_val = cc_cache[tri]
             if cc_val is None:
                 continue
 
@@ -124,17 +124,16 @@ def bowyer_watson(points):
 
         boundary_edges = [e for e, count in edge_count.items() if count == 1]
 
-        # Remove bad triangles
-        bad_set = set(bad_triangles)
-        triangles = [t for t in triangles if t not in bad_set]
+        # Remove bad triangles using O(1) set discard
         for tri in bad_triangles:
+            triangles.discard(tri)
             cc_cache.pop(tri, None)
 
         # Create new triangles from boundary edges to the new point
         for e in boundary_edges:
             verts = sorted((idx, e[0], e[1]))
             new_tri = (verts[0], verts[1], verts[2])
-            triangles.append(new_tri)
+            triangles.add(new_tri)
 
             p1 = all_points[new_tri[0]]
             p2 = all_points[new_tri[1]]
@@ -143,7 +142,7 @@ def bowyer_watson(points):
             if cc_val:
                 cc_cache[new_tri] = cc_val
 
-    return triangles, all_points
+    return list(triangles), all_points
 
 
 def delaunay_to_voronoi(points, triangles, all_points):
