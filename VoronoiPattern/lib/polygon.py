@@ -392,11 +392,12 @@ def expand_polygon(polygon, distance):
 
 
 def _slit_polygon(polygon, hole):
-    """Create a simple polygon from polygon with hole using a slit.
+    """Create a simple polygon from polygon with hole using a thin slit.
 
     When a hole is entirely inside a polygon, creates a slit (bridge)
     from the nearest polygon vertex to the hole boundary, walks around
-    the hole in reverse, and returns.
+    the hole in reverse, and returns. The two bridge lines are offset
+    by a small perpendicular distance to avoid overlapping sketch lines.
     """
     n_poly = len(polygon)
     n_hole = len(hole)
@@ -415,6 +416,20 @@ def _slit_polygon(polygon, hole):
                 best_pi = pi
                 best_hi = hi
 
+    # Compute perpendicular offset for slit width (0.005 cm = 0.05 mm)
+    px, py = polygon[best_pi]
+    hx, hy = hole[best_hi]
+    dx, dy = hx - px, hy - py
+    bridge_len = math.sqrt(dx * dx + dy * dy)
+    slit_half = 0.005
+    if bridge_len > 1e-8:
+        # Perpendicular unit vector
+        nx, ny = -dy / bridge_len, dx / bridge_len
+    else:
+        nx, ny = 0.0, 1.0
+
+    ox, oy = nx * slit_half, ny * slit_half
+
     # Walk hole in direction opposite to polygon winding
     poly_area = polygon_area(polygon)
     hole_area = polygon_area(hole)
@@ -424,18 +439,25 @@ def _slit_polygon(polygon, hole):
     for i in range(best_pi + 1):
         result.append(polygon[i])
 
+    # Bridge outward (offset +)
+    result.append((px + ox, py + oy))
+    result.append((hx + ox, hy + oy))
+
     # Walk around hole (opposite winding to carve it out)
     if poly_area * hole_area > 0:
         # Same winding: walk hole in reverse
-        for k in range(n_hole + 1):
+        for k in range(1, n_hole):
             result.append(hole[(best_hi - k) % n_hole])
     else:
         # Opposite winding: walk hole forward
-        for k in range(n_hole + 1):
+        for k in range(1, n_hole):
             result.append(hole[(best_hi + k) % n_hole])
 
-    # Bridge back to polygon slit point and continue
-    result.append(polygon[best_pi])
+    # Bridge return (offset -)
+    result.append((hx - ox, hy - oy))
+    result.append((px - ox, py - oy))
+
+    # Continue polygon
     for i in range(best_pi + 1, n_poly):
         result.append(polygon[i])
 
@@ -647,7 +669,7 @@ def round_corners(polygon, radius):
         dot = max(-1.0, min(1.0, dot))
         angle = math.acos(dot)
 
-        if abs(angle) < 1e-6 or abs(angle - math.pi) < 1e-6:
+        if abs(angle) < 1e-6 or angle > math.radians(170):
             tangent_points.append(None)
             continue
 

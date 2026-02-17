@@ -6,23 +6,12 @@ Boundary extraction converts model-space points to sketch-space
 using sketch.modelToSketchSpace().
 """
 
-import os
-
 try:
     import adsk.core
     import adsk.fusion
 except ImportError:
     # Allow import outside Fusion for testing
     adsk = None
-
-_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'debug.log')
-
-def _log(msg):
-    try:
-        with open(_LOG_PATH, 'a') as f:
-            f.write(msg + '\n')
-    except Exception:
-        pass
 
 def _simplify_cell(cell, min_edge_len):
     """Remove vertices that create edges shorter than min_edge_len.
@@ -75,7 +64,7 @@ def draw_voronoi_pattern(sketch, cells, corner_radius):
                 continue
 
             if corner_radius > 0:
-                cell = _simplify_cell(cell, corner_radius * 0.5)
+                cell = _simplify_cell(cell, corner_radius * 1.0)
                 if len(cell) < 3:
                     continue
                 segments = round_corners(cell, corner_radius)
@@ -91,6 +80,7 @@ def _draw_segments(sketch, segments):
 
     Uses addByTwoPoints for lines and addByThreePoints for arcs,
     avoiding addFillet which corrupts SWIG wrappers.
+    Falls back to straight lines when arcs fail to ensure closed profiles.
     """
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
@@ -108,20 +98,24 @@ def _draw_segments(sketch, segments):
             x1, y1 = seg['x1'], seg['y1']
             mx, my = seg['mx'], seg['my']
             x2, y2 = seg['x2'], seg['y2']
-            # Check for degenerate arc (collinear or coincident points)
-            cross = (mx - x1) * (y2 - y1) - (my - y1) * (x2 - x1)
             d12 = (x2 - x1) ** 2 + (y2 - y1) ** 2
-            if abs(cross) < 1e-8 or d12 < 1e-10:
-                # Fall back to straight line
-                if d12 >= 1e-10:
-                    pt1 = adsk.core.Point3D.create(x1, y1, 0)
-                    pt2 = adsk.core.Point3D.create(x2, y2, 0)
-                    lines.addByTwoPoints(pt1, pt2)
+            if d12 < 1e-10:
+                continue
+            # Check for degenerate arc (collinear points)
+            cross = (mx - x1) * (y2 - y1) - (my - y1) * (x2 - x1)
+            if abs(cross) < 1e-8:
+                # Nearly straight — draw as line
+                pt1 = adsk.core.Point3D.create(x1, y1, 0)
+                pt2 = adsk.core.Point3D.create(x2, y2, 0)
+                lines.addByTwoPoints(pt1, pt2)
                 continue
             pt1 = adsk.core.Point3D.create(x1, y1, 0)
             mid = adsk.core.Point3D.create(mx, my, 0)
             pt2 = adsk.core.Point3D.create(x2, y2, 0)
-            arcs.addByThreePoints(pt1, mid, pt2)
+            arc = arcs.addByThreePoints(pt1, mid, pt2)
+            if arc is None:
+                # Arc creation failed — fall back to straight line
+                lines.addByTwoPoints(pt1, pt2)
 
 
 def _draw_straight_cell(sketch, cell):

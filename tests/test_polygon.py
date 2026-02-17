@@ -139,6 +139,35 @@ class TestRoundCorners:
                 assert 'mx' in s
                 assert 'my' in s
 
+    def test_obtuse_angle_produces_lines_only(self):
+        """Very obtuse angles (>170deg) should be treated as straight."""
+        # Nearly straight vertex at (5, 0.1) — angle ~176deg
+        poly = [(0, 0), (5, 0.1), (10, 0), (10, 10), (0, 10)]
+        segments = round_corners(poly, 1.0)
+        # Should form a continuous closed loop of segments
+        assert len(segments) >= 5
+        # The obtuse vertex should NOT have an arc
+        # Count arcs — should be 4 (one per 90-ish corner), not 5
+        arcs = [s for s in segments if s['type'] == 'arc']
+        assert len(arcs) == 4
+
+    def test_short_edges_segments_continuous(self):
+        """Segments from a cell with short edges form a closed loop."""
+        # Simulate a cell with a short edge (0.04cm) like the real data
+        poly = [(9.0, 2.0), (9.5, 2.0), (9.5001, 2.044),
+                (9.5, 3.0), (9.0, 3.0)]
+        segments = round_corners(poly, 0.1)
+        # Verify all segments have valid coordinates
+        for s in segments:
+            assert 'x1' in s and 'y1' in s
+            assert 'x2' in s and 'y2' in s
+        # Verify the loop closes: last segment end ≈ first segment start
+        first = segments[0]
+        last = segments[-1]
+        dx = last['x2'] - first['x1']
+        dy = last['y2'] - first['y1']
+        assert dx * dx + dy * dy < 1e-8
+
 
 class TestExpandPolygon:
     def test_square_expand(self):

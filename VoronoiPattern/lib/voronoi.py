@@ -198,12 +198,82 @@ def delaunay_to_voronoi(points, triangles, all_points):
     return voronoi_cells
 
 
-def compute_voronoi(seeds, boundary_bbox):
-    """Compute Voronoi diagram with mirror points for boundary handling.
+def _boundary_guard_seeds(boundary, n_seeds):
+    """Generate guard seeds outside the boundary for Voronoi cell closure.
+
+    Places seeds at regular intervals along the boundary perimeter,
+    offset outward. This ensures interior Voronoi cells close properly
+    near the boundary, including corners and curved sections.
+    """
+    n = len(boundary)
+    if n < 3:
+        return []
+
+    # Compute perimeter
+    perimeter = 0.0
+    for i in range(n):
+        x1, y1 = boundary[i]
+        x2, y2 = boundary[(i + 1) % n]
+        perimeter += math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    if perimeter < 1e-10:
+        return []
+
+    # Compute polygon area (shoelace) to determine winding direction
+    area = 0.0
+    for i in range(n):
+        x1, y1 = boundary[i]
+        x2, y2 = boundary[(i + 1) % n]
+        area += x1 * y2 - x2 * y1
+    area /= 2.0
+
+    # Outward normal sign: +1 for CCW, -1 for CW
+    sign = 1.0 if area > 0 else -1.0
+
+    # Offset distance: proportional to average seed spacing
+    cell_area = abs(area) / max(n_seeds, 1)
+    offset_dist = math.sqrt(cell_area)
+
+    # Place guard seeds at regular intervals along the boundary
+    interval = perimeter / max(n_seeds, 4)
+    guards = []
+    dist_remaining = 0.0
+
+    for i in range(n):
+        x1, y1 = boundary[i]
+        x2, y2 = boundary[(i + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        edge_len = math.sqrt(dx * dx + dy * dy)
+        if edge_len < 1e-10:
+            continue
+
+        # Outward normal for this edge
+        nx = sign * dy / edge_len
+        ny = sign * (-dx) / edge_len
+
+        # Walk along the edge, placing guards at interval spacing
+        t = dist_remaining
+        while t <= edge_len:
+            frac = t / edge_len
+            px = x1 + dx * frac
+            py = y1 + dy * frac
+            guards.append((px + nx * offset_dist, py + ny * offset_dist))
+            t += interval
+
+        dist_remaining = t - edge_len
+
+    return guards
+
+
+def compute_voronoi(seeds, boundary_bbox, boundary=None):
+    """Compute Voronoi diagram with guard seeds for boundary handling.
 
     Args:
         seeds: List of (x, y) seed points.
         boundary_bbox: (min_x, min_y, max_x, max_y) bounding box.
+        boundary: Optional boundary polygon (list of (x, y) tuples).
+            When provided, guard seeds are placed along the actual
+            boundary shape instead of using bbox mirror points.
 
     Returns:
         List of Voronoi cell polygons (list of (x, y) tuples),
@@ -214,15 +284,19 @@ def compute_voronoi(seeds, boundary_bbox):
         return [None] * len(seeds)
 
     min_x, min_y, max_x, max_y = boundary_bbox
-    # Add mirror points to ensure boundary cells close properly
-    mirror_points = []
-    for sx, sy in seeds:
-        mirror_points.append((2 * min_x - sx, sy))        # Left mirror
-        mirror_points.append((2 * max_x - sx, sy))        # Right mirror
-        mirror_points.append((sx, 2 * min_y - sy))        # Bottom mirror
-        mirror_points.append((sx, 2 * max_y - sy))        # Top mirror
 
-    all_seeds = list(seeds) + mirror_points
+    if boundary is not None and len(boundary) >= 3:
+        guard_seeds = _boundary_guard_seeds(boundary, len(seeds))
+    else:
+        # Fallback: mirror points across bbox edges
+        guard_seeds = []
+        for sx, sy in seeds:
+            guard_seeds.append((2 * min_x - sx, sy))
+            guard_seeds.append((2 * max_x - sx, sy))
+            guard_seeds.append((sx, 2 * min_y - sy))
+            guard_seeds.append((sx, 2 * max_y - sy))
+
+    all_seeds = list(seeds) + guard_seeds
     n_original = len(seeds)
 
     triangles, all_points = bowyer_watson(all_seeds)

@@ -79,3 +79,37 @@ class TestComputeVoronoi:
         for cell in cells:
             if cell is not None:
                 assert len(cell) >= 3  # Each cell should be a polygon
+
+    def test_boundary_guard_seeds(self):
+        """With boundary polygon, all cells should be generated."""
+        seeds = [(3, 3), (7, 3), (5, 7), (3, 7), (7, 7)]
+        bbox = (0, 0, 10, 10)
+        boundary = [(0, 0), (10, 0), (10, 10), (0, 10)]
+        cells = compute_voronoi(seeds, bbox, boundary=boundary)
+        assert len(cells) == 5
+        non_none = [c for c in cells if c is not None]
+        assert len(non_none) == 5
+
+    def test_corner_seeds_with_boundary(self):
+        """Seeds near corners should produce valid cells with boundary."""
+        # Place seeds near all 4 corners
+        seeds = [(1, 1), (9, 1), (9, 9), (1, 9), (5, 5)]
+        bbox = (0, 0, 10, 10)
+        boundary = [(0, 0), (10, 0), (10, 10), (0, 10)]
+        cells = compute_voronoi(seeds, bbox, boundary=boundary)
+        assert len(cells) == 5
+        # All cells should be valid (not None), especially corner ones
+        for i, cell in enumerate(cells):
+            assert cell is not None, f"Cell {i} is None"
+            assert len(cell) >= 3, f"Cell {i} has < 3 vertices"
+
+    def test_non_rectangular_boundary(self):
+        """Non-rectangular boundary should still produce all cells."""
+        # L-shaped boundary
+        boundary = [(0, 0), (10, 0), (10, 5), (5, 5), (5, 10), (0, 10)]
+        seeds = [(2, 2), (7, 2), (2, 7), (3, 4)]
+        bbox = (0, 0, 10, 10)
+        cells = compute_voronoi(seeds, bbox, boundary=boundary)
+        assert len(cells) == 4
+        non_none = [c for c in cells if c is not None]
+        assert len(non_none) == 4
