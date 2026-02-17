@@ -84,7 +84,7 @@ Random seed points are placed inside the face boundary using rejection sampling:
 
 The Delaunay triangulation is computed using the Bowyer-Watson incremental algorithm, then converted to the dual Voronoi diagram:
 
-1. **Delaunay Triangulation**: Each seed point is inserted incrementally. Triangles whose circumcircle contains the new point are removed, and the resulting polygonal hole is re-triangulated.
+1. **Delaunay Triangulation**: Each seed point is inserted incrementally. Triangles whose circumcircle contains the new point are removed, and the resulting polygonal hole is re-triangulated. Triangles are stored in a hash set for O(1) insertion and removal, keeping the algorithm efficient at high seed counts.
 2. **Voronoi Dual**: The circumcenters of triangles adjacent to each seed form the Voronoi cell vertices, sorted by angle around the seed.
 
 **Boundary guard seeds**: To ensure cells near the face boundary close properly, guard seeds are placed at regular intervals along the boundary perimeter, offset outward by the average cell spacing. This follows the actual face shape (not just the bounding box), ensuring correct cell closure at corners and along curved/non-rectangular boundaries.
@@ -94,6 +94,8 @@ The Delaunay triangulation is computed using the Bowyer-Watson incremental algor
 Each Voronoi cell passes through two clipping stages:
 1. **Wide bounding box clip** — removes far-away vertices from infinite Voronoi regions
 2. **Boundary clip** (Sutherland-Hodgman variant for arbitrary polygons) — clips to an inset boundary (`boundary - rib_width/2`) ensuring the edge margin
+
+Both clipping stages use AABB (axis-aligned bounding box) pre-filtering on edge intersection tests, rejecting ~80% of candidate edge pairs before the full segment-intersection calculation. Boundary walks of 5 or fewer vertices skip the expensive point-in-polygon verification.
 
 ### 5. Cell Offset
 
@@ -113,9 +115,9 @@ Cells are clipped against expanded hole polygons using `clip_polygon_outside`:
 ### 7. Corner Rounding & Sketch Drawing
 
 For each cell:
-1. **Simplification**: Edges shorter than `corner_radius` are merged to prevent degenerate arcs
+1. **Simplification**: Edges shorter than `corner_radius` (min 0.01 cm) are merged using a two-pass linear algorithm — pass 1 marks short-edge vertices for removal in a single forward scan, pass 2 handles the wrap-around edge between the last and first vertex. This O(n) approach replaces the previous iterative loop that could degrade to O(n²) with many short edges from boundary clipping.
 2. **Corner rounding**: Each convex vertex is replaced by a circular arc tangent to both adjacent edges. The fillet radius is clamped to 40% of the shorter adjacent edge to prevent overlap. Very obtuse angles (>170°) are left sharp.
-3. **Drawing**: Lines use `addByTwoPoints`, arcs use `addByThreePoints` with automatic fallback to lines if the arc creation fails. All operations are batched with `isComputeDeferred = True` for performance.
+3. **Drawing**: Lines use `addByTwoPoints`, arcs use `addByThreePoints` with automatic fallback to lines if the arc creation fails. All operations are batched with `isComputeDeferred = True` for performance. A progress dialog with a Cancel button is shown during processing, updating every 5 cells via `adsk.doEvents()` to keep the UI responsive.
 
 ## Standalone Testing
 
