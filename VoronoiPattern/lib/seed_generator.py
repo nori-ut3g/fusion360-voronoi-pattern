@@ -41,26 +41,18 @@ def generate_seeds(boundary, seed_count, edge_margin, exclude_circles=None,
     min_y = min(p[1] for p in boundary)
     max_y = max(p[1] for p in boundary)
 
-    # Inset bounding box by edge_margin
-    sample_min_x = min_x + edge_margin
-    sample_max_x = max_x - edge_margin
-    sample_min_y = min_y + edge_margin
-    sample_max_y = max_y - edge_margin
-
-    if sample_min_x >= sample_max_x or sample_min_y >= sample_max_y:
+    if max_x - min_x < 1e-6 or max_y - min_y < 1e-6:
         return []
 
-    # Inset boundary for point-in-polygon check
-    # (simple approach: use bounding box check + polygon check)
     seeds = []
-    max_attempts = seed_count * 50
+    max_attempts = seed_count * 100
 
     for _ in range(max_attempts):
         if len(seeds) >= seed_count:
             break
 
-        x = rng.uniform(sample_min_x, sample_max_x)
-        y = rng.uniform(sample_min_y, sample_max_y)
+        x = rng.uniform(min_x, max_x)
+        y = rng.uniform(min_y, max_y)
 
         # Check if point is inside boundary polygon
         if not point_in_polygon((x, y), boundary):
