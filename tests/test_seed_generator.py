@@ -95,3 +95,14 @@ class TestGenerateSeeds:
         boundary = [(0, 0), (10, 0), (10, 10), (0, 10)]
         seeds = generate_seeds(boundary, seed_count=10, edge_margin=6.0)
         assert len(seeds) == 0
+
+    def test_exclude_polygons(self):
+        """Seeds should not be placed inside exclude_polygons."""
+        boundary = self._square_boundary()
+        exclude_poly = [(40, 40), (60, 40), (60, 60), (40, 60)]
+        seeds = generate_seeds(boundary, seed_count=50, edge_margin=5.0,
+                               exclude_polygons=[exclude_poly],
+                               density_gradient=False)
+        assert len(seeds) > 0
+        for x, y in seeds:
+            assert not point_in_polygon((x, y), exclude_poly)

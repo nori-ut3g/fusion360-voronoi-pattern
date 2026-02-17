@@ -55,7 +55,8 @@ def _load_defaults():
     except Exception:
         return {
             'seed_count': 40, 'min_rib_width': 3.0, 'edge_margin': 5.0,
-            'corner_radius': 1.0, 'random_seed': 42, 'density_gradient': True,
+            'hole_margin': 2.0, 'corner_radius': 1.0, 'random_seed': 42,
+            'density_gradient': True,
         }
 
 
@@ -92,12 +93,14 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             from lib.voronoi import compute_voronoi
             from lib.polygon import (
                 clip_polygon, clip_polygon_to_boundary,
+                clip_polygon_outside, expand_polygon,
                 offset_polygon, polygon_area,
                 polygon_centroid, point_in_polygon,
             )
             from lib.seed_generator import generate_seeds
             from lib.sketch_drawer import (
-                draw_voronoi_pattern, get_face_boundary, get_exclude_circles,
+                draw_voronoi_pattern, get_face_boundary,
+                get_face_holes, get_exclude_circles,
             )
             _log('Execute handler: imports OK')
 
@@ -118,6 +121,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             # Values are already in cm (Fusion internal unit)
             rib_width = inputs.itemById('minRibWidth').value
             edge_margin = inputs.itemById('edgeMargin').value
+            hole_margin = inputs.itemById('holeMargin').value
             corner_radius = inputs.itemById('cornerRadius').value
             random_seed = inputs.itemById('randomSeed').value
             density_gradient = inputs.itemById('densityGradient').value
@@ -132,6 +136,15 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
 
             boundary = get_face_boundary(face, sketch)
             exclude_circles = get_exclude_circles(hole_entities, sketch)
+            face_holes = get_face_holes(face, sketch)
+            _log(f'face_holes: {len(face_holes)} holes')
+
+            # Expand each hole polygon outward by hole_margin
+            expanded_holes = []
+            for hole_poly in face_holes:
+                expanded = expand_polygon(hole_poly, hole_margin)
+                if expanded is not None:
+                    expanded_holes.append(expanded)
 
             if len(boundary) < 3:
                 ui.messageBox('Could not extract face boundary.')
@@ -150,6 +163,7 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
             seeds = generate_seeds(
                 boundary, seed_count, edge_margin,
                 exclude_circles=exclude_circles,
+                exclude_polygons=expanded_holes,
                 density_gradient=density_gradient,
                 random_seed=random_seed,
             )
@@ -182,6 +196,17 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 # Apply offset for rib width
                 offset = offset_polygon(clipped, rib_width / 2.0)
                 if offset is None:
+                    continue
+                if abs(polygon_area(offset)) < 0.005:
+                    continue
+                # Clip cell against expanded hole regions
+                skip = False
+                for hole_poly in expanded_holes:
+                    offset = clip_polygon_outside(offset, hole_poly)
+                    if len(offset) < 3:
+                        skip = True
+                        break
+                if skip:
                     continue
                 if abs(polygon_area(offset)) < 0.005:
                     continue
@@ -246,6 +271,11 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 'edgeMargin', 'Edge Margin', 'mm',
                 adsk.core.ValueInput.createByReal(
                     d.get('edge_margin', 5.0) * 0.1))
+
+            inputs.addValueInput(
+                'holeMargin', 'Hole Margin', 'mm',
+                adsk.core.ValueInput.createByReal(
+                    d.get('hole_margin', 2.0) * 0.1))
 
             inputs.addValueInput(
                 'cornerRadius', 'Corner Radius', 'mm',

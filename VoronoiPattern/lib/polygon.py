@@ -349,6 +349,219 @@ def offset_polygon(polygon, distance):
     return result
 
 
+def expand_polygon(polygon, distance):
+    """Expand a polygon outward by the given distance.
+
+    Scales the polygon away from its centroid so that the minimum
+    distance from centroid to edges increases by `distance`.
+
+    Args:
+        polygon: List of (x, y) tuples.
+        distance: Expansion distance (positive = outward).
+
+    Returns:
+        Expanded polygon as list of (x, y) tuples, or None if degenerate.
+    """
+    n = len(polygon)
+    if n < 3:
+        return None
+
+    area = abs(polygon_area(polygon))
+    if area < 1e-12:
+        return None
+
+    cx, cy = polygon_centroid(polygon)
+
+    perimeter = 0.0
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        perimeter += math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    if perimeter < 1e-12:
+        return None
+
+    inradius = 2.0 * area / perimeter
+    scale = (inradius + distance) / inradius
+
+    result = []
+    for x, y in polygon:
+        result.append((cx + (x - cx) * scale, cy + (y - cy) * scale))
+
+    return result
+
+
+def _slit_polygon(polygon, hole):
+    """Create a simple polygon from polygon with hole using a slit.
+
+    When a hole is entirely inside a polygon, creates a slit (bridge)
+    from the nearest polygon vertex to the hole boundary, walks around
+    the hole in reverse, and returns.
+    """
+    n_poly = len(polygon)
+    n_hole = len(hole)
+
+    # Find nearest polygon vertex to any hole vertex
+    best_dist = float('inf')
+    best_pi = 0
+    best_hi = 0
+    for pi in range(n_poly):
+        px, py = polygon[pi]
+        for hi in range(n_hole):
+            hx, hy = hole[hi]
+            d = (px - hx) ** 2 + (py - hy) ** 2
+            if d < best_dist:
+                best_dist = d
+                best_pi = pi
+                best_hi = hi
+
+    # Walk hole in direction opposite to polygon winding
+    poly_area = polygon_area(polygon)
+    hole_area = polygon_area(hole)
+
+    result = []
+    # Polygon vertices up to slit point
+    for i in range(best_pi + 1):
+        result.append(polygon[i])
+
+    # Walk around hole (opposite winding to carve it out)
+    if poly_area * hole_area > 0:
+        # Same winding: walk hole in reverse
+        for k in range(n_hole + 1):
+            result.append(hole[(best_hi - k) % n_hole])
+    else:
+        # Opposite winding: walk hole forward
+        for k in range(n_hole + 1):
+            result.append(hole[(best_hi + k) % n_hole])
+
+    # Bridge back to polygon slit point and continue
+    result.append(polygon[best_pi])
+    for i in range(best_pi + 1, n_poly):
+        result.append(polygon[i])
+
+    return result
+
+
+def clip_polygon_outside(polygon, hole):
+    """Clip polygon to exclude area inside a hole polygon.
+
+    The inverse of clip_polygon_to_boundary: keeps the portion of
+    the polygon that lies OUTSIDE the hole.
+
+    Args:
+        polygon: List of (x, y) tuples to clip.
+        hole: List of (x, y) tuples defining the hole to exclude.
+
+    Returns:
+        Clipped polygon as list of (x, y) tuples.
+    """
+    n_poly = len(polygon)
+    n_hole = len(hole)
+
+    if n_poly < 3 or n_hole < 3:
+        return list(polygon) if n_poly >= 3 else []
+
+    poly_outside = [not point_in_polygon(p, hole) for p in polygon]
+
+    if all(poly_outside):
+        # Check if hole is entirely inside polygon (no edge crossings)
+        if any(point_in_polygon(h, polygon) for h in hole):
+            return _slit_polygon(polygon, hole)
+        return list(polygon)
+    if not any(poly_outside):
+        return []
+
+    def find_all_ix(p1, p2):
+        ixs = []
+        x1, y1 = p1
+        x2, y2 = p2
+        for j in range(n_hole):
+            hx1, hy1 = hole[j]
+            hx2, hy2 = hole[(j + 1) % n_hole]
+            r = _seg_intersect(x1, y1, x2, y2, hx1, hy1, hx2, hy2)
+            if r:
+                t, ix, iy = r
+                ixs.append((t, (ix, iy), j))
+        ixs.sort()
+        cleaned = []
+        for ix in ixs:
+            if not cleaned or \
+               (ix[1][0] - cleaned[-1][1][0]) ** 2 + \
+               (ix[1][1] - cleaned[-1][1][1]) ** 2 > 1e-10:
+                cleaned.append(ix)
+        return cleaned
+
+    def walk_hole(entry_hedge, exit_hedge):
+        fwd_count = (exit_hedge - entry_hedge) % n_hole
+        bwd_count = (entry_hedge - exit_hedge) % n_hole
+
+        if fwd_count <= bwd_count:
+            verts = []
+            he = (entry_hedge + 1) % n_hole
+            for _ in range(fwd_count):
+                verts.append(hole[he])
+                he = (he + 1) % n_hole
+        else:
+            verts = []
+            he = entry_hedge
+            for _ in range(bwd_count):
+                verts.append(hole[he])
+                he = (he - 1) % n_hole
+
+        return [v for v in verts if point_in_polygon(v, polygon)]
+
+    result = []
+    last_entry_hedge = None
+
+    for i in range(n_poly):
+        j = (i + 1) % n_poly
+        curr_out = poly_outside[i]
+        next_out = poly_outside[j]
+        ixs = find_all_ix(polygon[i], polygon[j])
+
+        if curr_out:
+            result.append(polygon[i])
+
+        if curr_out and not next_out:
+            # Entering hole
+            if ixs:
+                result.append(ixs[-1][1])
+                last_entry_hedge = ixs[-1][2]
+
+        elif not curr_out and next_out:
+            # Exiting hole
+            if ixs:
+                exit_hedge = ixs[0][2]
+                if last_entry_hedge is not None:
+                    result.extend(walk_hole(last_entry_hedge, exit_hedge))
+                    last_entry_hedge = None
+                result.append(ixs[0][1])
+
+        elif not curr_out and not next_out and len(ixs) >= 2:
+            # Both inside hole, edge temporarily exits
+            for k in range(0, len(ixs) - 1, 2):
+                exit_hedge = ixs[k][2]
+                if last_entry_hedge is not None:
+                    result.extend(
+                        walk_hole(last_entry_hedge, exit_hedge))
+                result.append(ixs[k][1])
+                result.append(ixs[k + 1][1])
+                last_entry_hedge = ixs[k + 1][2]
+
+    if len(result) < 3:
+        return []
+    cleaned = [result[0]]
+    for p in result[1:]:
+        if (p[0] - cleaned[-1][0]) ** 2 + \
+           (p[1] - cleaned[-1][1]) ** 2 > 1e-12:
+            cleaned.append(p)
+    if len(cleaned) >= 2 and \
+       (cleaned[-1][0] - cleaned[0][0]) ** 2 + \
+       (cleaned[-1][1] - cleaned[0][1]) ** 2 < 1e-12:
+        cleaned.pop()
+    return cleaned if len(cleaned) >= 3 else []
+
+
 def round_corners(polygon, radius):
     """Round polygon corners with circular arcs.
 

@@ -146,7 +146,15 @@ def get_face_boundary(face, sketch):
     Returns:
         List of (x, y) tuples in sketch-space cm.
     """
-    outer_loop = face.loops[0]
+    # Find the outer loop (face.loops[0] may be a hole loop)
+    outer_loop = None
+    for loop in face.loops:
+        if loop.isOuter:
+            outer_loop = loop
+            break
+    if outer_loop is None:
+        outer_loop = face.loops[0]
+
     boundary_points = []
 
     for edge in outer_loop.edges:
@@ -167,6 +175,47 @@ def get_face_boundary(face, sketch):
             cleaned.append((px, py))
 
     return cleaned
+
+
+def get_face_holes(face, sketch):
+    """Extract inner loop (hole) polygons from a BRepFace in sketch space.
+
+    Args:
+        face: adsk.fusion.BRepFace
+        sketch: adsk.fusion.Sketch created on the face.
+
+    Returns:
+        List of hole polygons, each a list of (x, y) tuples in sketch-space cm.
+    """
+    holes = []
+    for loop in face.loops:
+        if loop.isOuter:
+            continue
+
+        hole_points = []
+        for edge in loop.edges:
+            evaluator = edge.evaluator
+            _, start_param, end_param = evaluator.getParameterExtents()
+            _, points = evaluator.getStrokes(start_param, end_param, 0.01)
+            for pt in points:
+                sketch_pt = sketch.modelToSketchSpace(pt)
+                hole_points.append((sketch_pt.x, sketch_pt.y))
+
+        if not hole_points:
+            continue
+
+        # Remove duplicate consecutive points
+        cleaned = [hole_points[0]]
+        for i in range(1, len(hole_points)):
+            px, py = hole_points[i]
+            lx, ly = cleaned[-1]
+            if abs(px - lx) > 0.0001 or abs(py - ly) > 0.0001:
+                cleaned.append((px, py))
+
+        if len(cleaned) >= 3:
+            holes.append(cleaned)
+
+    return holes
 
 
 def get_exclude_circles(selections, sketch):

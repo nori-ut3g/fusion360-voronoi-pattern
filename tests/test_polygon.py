@@ -13,6 +13,8 @@ from lib.polygon import (
     point_in_polygon,
     clip_polygon,
     offset_polygon,
+    expand_polygon,
+    clip_polygon_outside,
     round_corners,
 )
 
@@ -136,3 +138,66 @@ class TestRoundCorners:
             if s['type'] == 'arc':
                 assert 'mx' in s
                 assert 'my' in s
+
+
+class TestExpandPolygon:
+    def test_square_expand(self):
+        square = [(0, 0), (20, 0), (20, 20), (0, 20)]
+        result = expand_polygon(square, 2.0)
+        assert result is not None
+        assert len(result) == 4
+        assert abs(polygon_area(result)) > abs(polygon_area(square))
+
+    def test_expand_then_offset_roundtrip(self):
+        square = [(0, 0), (20, 0), (20, 20), (0, 20)]
+        expanded = expand_polygon(square, 3.0)
+        restored = offset_polygon(expanded, 3.0)
+        assert restored is not None
+        orig_area = abs(polygon_area(square))
+        restored_area = abs(polygon_area(restored))
+        assert abs(orig_area - restored_area) < 1.0
+
+    def test_degenerate(self):
+        assert expand_polygon([], 1.0) is None
+        assert expand_polygon([(0, 0), (1, 1)], 1.0) is None
+
+
+class TestClipPolygonOutside:
+    def test_no_overlap(self):
+        poly = [(0, 0), (10, 0), (10, 10), (0, 10)]
+        hole = [(20, 20), (30, 20), (30, 30), (20, 30)]
+        result = clip_polygon_outside(poly, hole)
+        assert len(result) == 4
+
+    def test_polygon_inside_hole(self):
+        poly = [(3, 3), (7, 3), (7, 7), (3, 7)]
+        hole = [(0, 0), (10, 0), (10, 10), (0, 10)]
+        result = clip_polygon_outside(poly, hole)
+        assert len(result) == 0
+
+    def test_partial_overlap(self):
+        poly = [(0, 0), (20, 0), (20, 20), (0, 20)]
+        hole = [(5, 5), (15, 5), (15, 15), (5, 15)]
+        result = clip_polygon_outside(poly, hole)
+        assert len(result) >= 4
+        result_area = abs(polygon_area(result))
+        assert abs(result_area - 300.0) < 20.0
+
+    def test_hole_overlaps_corner(self):
+        poly = [(0, 0), (20, 0), (20, 20), (0, 20)]
+        hole = [(-5, -5), (10, -5), (10, 10), (-5, 10)]
+        result = clip_polygon_outside(poly, hole)
+        assert len(result) >= 3
+        result_area = abs(polygon_area(result))
+        assert 200.0 < result_area < 400.0
+
+    def test_circular_hole(self):
+        poly = [(0, 0), (40, 0), (40, 40), (0, 40)]
+        n = 32
+        hole = [(20 + 5 * math.cos(2 * math.pi * i / n),
+                 20 + 5 * math.sin(2 * math.pi * i / n)) for i in range(n)]
+        result = clip_polygon_outside(poly, hole)
+        assert len(result) >= n
+        result_area = abs(polygon_area(result))
+        hole_area = math.pi * 25
+        assert abs(result_area - (1600.0 - hole_area)) < 20.0

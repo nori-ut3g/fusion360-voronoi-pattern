@@ -15,7 +15,7 @@ from .polygon import point_in_polygon
 
 
 def generate_seeds(boundary, seed_count, edge_margin, exclude_circles=None,
-                   density_gradient=True, random_seed=42):
+                   exclude_polygons=None, density_gradient=True, random_seed=42):
     """Generate seed points within a boundary polygon.
 
     Args:
@@ -24,6 +24,8 @@ def generate_seeds(boundary, seed_count, edge_margin, exclude_circles=None,
         edge_margin: Margin from the boundary edges (mm).
         exclude_circles: List of (cx, cy, radius) tuples for mount holes
                          to exclude.
+        exclude_polygons: List of polygons (list of (x, y) tuples) to
+                          exclude (e.g. expanded hole regions).
         density_gradient: If True, increase density near mount holes.
         random_seed: Random seed for reproducibility.
 
@@ -32,6 +34,8 @@ def generate_seeds(boundary, seed_count, edge_margin, exclude_circles=None,
     """
     if exclude_circles is None:
         exclude_circles = []
+    if exclude_polygons is None:
+        exclude_polygons = []
 
     rng = random.Random(random_seed)
 
@@ -71,6 +75,16 @@ def generate_seeds(boundary, seed_count, edge_margin, exclude_circles=None,
                 break
         if in_exclusion:
             continue
+
+        # Check exclusion polygons (auto-detected hole regions)
+        if exclude_polygons:
+            in_poly_exclusion = False
+            for hole_poly in exclude_polygons:
+                if point_in_polygon((x, y), hole_poly):
+                    in_poly_exclusion = True
+                    break
+            if in_poly_exclusion:
+                continue
 
         # Density gradient: rejection sampling
         if density_gradient and exclude_circles:
