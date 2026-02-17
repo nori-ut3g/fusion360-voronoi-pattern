@@ -464,10 +464,26 @@ def clip_polygon_outside(polygon, hole):
     poly_outside = [not point_in_polygon(p, hole) for p in polygon]
 
     if all(poly_outside):
-        # Check if hole is entirely inside polygon (no edge crossings)
+        # Check if hole is entirely inside polygon
         if any(point_in_polygon(h, polygon) for h in hole):
             return _slit_polygon(polygon, hole)
-        return list(polygon)
+        # Check for edge-only intersections (no vertices inside each other
+        # but edges cross — e.g. elongated cell crossing expanded hole)
+        has_edge_ix = False
+        for i in range(n_poly):
+            x1, y1 = polygon[i]
+            x2, y2 = polygon[(i + 1) % n_poly]
+            for j in range(n_hole):
+                hx1, hy1 = hole[j]
+                hx2, hy2 = hole[(j + 1) % n_hole]
+                if _seg_intersect(x1, y1, x2, y2, hx1, hy1, hx2, hy2):
+                    has_edge_ix = True
+                    break
+            if has_edge_ix:
+                break
+        if not has_edge_ix:
+            return list(polygon)
+        # Edge-only overlap: fall through to main clipping loop
     if not any(poly_outside):
         return []
 

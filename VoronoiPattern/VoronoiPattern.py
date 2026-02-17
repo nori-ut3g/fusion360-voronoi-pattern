@@ -202,6 +202,17 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
                 # Clip cell against expanded hole regions
                 skip = False
                 for hole_poly in expanded_holes:
+                    # Check if hole is fully inside cell
+                    hole_inside = any(
+                        point_in_polygon(h, offset) for h in hole_poly)
+                    cell_in_hole = any(
+                        point_in_polygon(p, hole_poly) for p in offset)
+                    if hole_inside and not cell_in_hole:
+                        # Cell fully surrounds hole: skip this cell.
+                        # Adjacent cells' clipped edges define the ring.
+                        skip = True
+                        break
+                    # Use clip_polygon_outside for partial overlap
                     offset = clip_polygon_outside(offset, hole_poly)
                     if len(offset) < 3:
                         skip = True
