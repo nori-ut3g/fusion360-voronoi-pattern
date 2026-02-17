@@ -380,6 +380,9 @@ def round_corners(polygon, radius):
             })
         return segments
 
+    # Determine winding direction for reflex vertex detection
+    area = polygon_area(polygon)
+
     # For each vertex, compute the tangent points and arc midpoint
     tangent_points = []  # (enter_x, enter_y, mid_x, mid_y, exit_x, exit_y)
     for i in range(n):
@@ -400,6 +403,12 @@ def round_corners(polygon, radius):
             tangent_points.append(None)
             continue
 
+        # Skip reflex (concave) vertices where filleting would bulge outward
+        cross = dx1 * dy2 - dy1 * dx2
+        if cross * area > 0:
+            tangent_points.append(None)
+            continue
+
         # Unit vectors
         ux1, uy1 = dx1 / len1, dy1 / len1
         ux2, uy2 = dx2 / len2, dy2 / len2
@@ -414,12 +423,15 @@ def round_corners(polygon, radius):
             continue
 
         # Distance from vertex to tangent point along each edge
-        tan_dist = radius / math.tan(angle / 2.0)
+        half_angle = angle / 2.0
+        tan_dist = radius / math.tan(half_angle)
 
-        # Clamp to half the edge length
+        # Clamp to fraction of edge length, recompute radius to match
         max_dist = min(len1, len2) * 0.4
+        r = radius
         if tan_dist > max_dist:
             tan_dist = max_dist
+            r = tan_dist * math.tan(half_angle)
 
         # Tangent points
         enter_x = curr_x + ux1 * tan_dist
@@ -439,13 +451,13 @@ def round_corners(polygon, radius):
         bisect_y /= bisect_len
 
         # Distance from vertex to arc center along bisector
-        center_dist = radius / math.sin(angle / 2.0)
+        center_dist = r / math.sin(half_angle)
         center_x = curr_x + bisect_x * center_dist
         center_y = curr_y + bisect_y * center_dist
 
         # Arc midpoint is on the circle, along the bisector from center
-        mid_x = center_x - bisect_x * radius
-        mid_y = center_y - bisect_y * radius
+        mid_x = center_x - bisect_x * r
+        mid_y = center_y - bisect_y * r
 
         tangent_points.append((enter_x, enter_y, mid_x, mid_y, exit_x, exit_y))
 

@@ -66,110 +66,74 @@ def draw_voronoi_pattern(sketch, cells, corner_radius):
         cells: List of Voronoi cell polygons (list of (x, y) tuples in cm).
         corner_radius: Corner rounding radius in cm (0 for sharp corners).
     """
-    for cell in cells:
-        if len(cell) < 3:
-            continue
+    from lib.polygon import round_corners
 
-        # Merge vertices that are too close, removing parasitic short edges
-        cell = _simplify_cell(cell, corner_radius * 0.5)
-        if len(cell) < 3:
-            continue
+    sketch.isComputeDeferred = True
+    try:
+        for cell in cells:
+            if len(cell) < 3:
+                continue
 
-        line_refs = _draw_straight_cell(sketch, cell)
+            if corner_radius > 0:
+                cell = _simplify_cell(cell, corner_radius * 0.5)
+                if len(cell) < 3:
+                    continue
+                segments = round_corners(cell, corner_radius)
+                _draw_segments(sketch, segments)
+            else:
+                _draw_straight_cell(sketch, cell)
+    finally:
+        sketch.isComputeDeferred = False
 
-        if corner_radius > 0 and line_refs:
-            _fillet_cell(sketch, cell, line_refs, corner_radius)
+
+def _draw_segments(sketch, segments):
+    """Draw a cell from pre-computed line/arc segments.
+
+    Uses addByTwoPoints for lines and addByThreePoints for arcs,
+    avoiding addFillet which corrupts SWIG wrappers.
+    """
+    lines = sketch.sketchCurves.sketchLines
+    arcs = sketch.sketchCurves.sketchArcs
+
+    for seg in segments:
+        if seg['type'] == 'line':
+            dx = seg['x2'] - seg['x1']
+            dy = seg['y2'] - seg['y1']
+            if dx * dx + dy * dy < 1e-10:
+                continue
+            pt1 = adsk.core.Point3D.create(seg['x1'], seg['y1'], 0)
+            pt2 = adsk.core.Point3D.create(seg['x2'], seg['y2'], 0)
+            lines.addByTwoPoints(pt1, pt2)
+        elif seg['type'] == 'arc':
+            x1, y1 = seg['x1'], seg['y1']
+            mx, my = seg['mx'], seg['my']
+            x2, y2 = seg['x2'], seg['y2']
+            # Check for degenerate arc (collinear or coincident points)
+            cross = (mx - x1) * (y2 - y1) - (my - y1) * (x2 - x1)
+            d12 = (x2 - x1) ** 2 + (y2 - y1) ** 2
+            if abs(cross) < 1e-8 or d12 < 1e-10:
+                # Fall back to straight line
+                if d12 >= 1e-10:
+                    pt1 = adsk.core.Point3D.create(x1, y1, 0)
+                    pt2 = adsk.core.Point3D.create(x2, y2, 0)
+                    lines.addByTwoPoints(pt1, pt2)
+                continue
+            pt1 = adsk.core.Point3D.create(x1, y1, 0)
+            mid = adsk.core.Point3D.create(mx, my, 0)
+            pt2 = adsk.core.Point3D.create(x2, y2, 0)
+            arcs.addByThreePoints(pt1, mid, pt2)
 
 
 def _draw_straight_cell(sketch, cell):
-    """Draw a cell as a closed polyline (straight edges only).
-
-    Returns:
-        List of SketchLine references (or empty list outside Fusion).
-    """
+    """Draw a cell as a closed polyline (straight edges only)."""
     lines = sketch.sketchCurves.sketchLines
     n = len(cell)
-    line_refs = []
     for i in range(n):
         x1, y1 = cell[i]
         x2, y2 = cell[(i + 1) % n]
         pt1 = adsk.core.Point3D.create(x1, y1, 0)
         pt2 = adsk.core.Point3D.create(x2, y2, 0)
-        line = lines.addByTwoPoints(pt1, pt2)
-        line_refs.append(line)
-    return line_refs
-
-
-def _fillet_cell(sketch, cell, line_refs, corner_radius):
-    """Apply fillets at each corner using Fusion 360 API."""
-    import math
-    arcs = sketch.sketchCurves.sketchArcs
-    n = len(line_refs)
-
-    # Compute edge lengths to clamp fillet radius
-    edge_lengths = []
-    for i in range(n):
-        x1, y1 = cell[i]
-        x2, y2 = cell[(i + 1) % n]
-        edge_lengths.append(math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
-
-    _log(f'  fillet_cell: n={n} corner_radius={corner_radius:.4f} edges={[f"{e:.4f}" for e in edge_lengths]}')
-
-    for i in range(n):
-        x1, y1 = cell[i]
-        x2, y2 = cell[(i + 1) % n]
-        x3, y3 = cell[(i + 2) % n]
-
-        len_e1 = edge_lengths[i]
-        len_e2 = edge_lengths[(i + 1) % n]
-        min_adj = min(len_e1, len_e2)
-
-        # Angle at vertex (i+1)
-        dx1, dy1 = x1 - x2, y1 - y2
-        dx2, dy2 = x3 - x2, y3 - y2
-        if len_e1 < 1e-8 or len_e2 < 1e-8:
-            _log(f'    v{i}: SKIP zero-length edge')
-            continue
-        dot = (dx1 * dx2 + dy1 * dy2) / (len_e1 * len_e2)
-        angle_deg = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
-
-        # Skip if nearly collinear (angle > 170°)
-        if dot < -0.985:
-            _log(f'    v{i}: SKIP collinear angle={angle_deg:.1f}')
-            continue
-
-        # Compute tangent length for this angle and clamp radius accordingly
-        # tangent_length = radius / tan(angle/2)
-        angle_rad = math.radians(angle_deg)
-        half_tan = math.tan(angle_rad / 2.0)
-        if half_tan < 1e-6:
-            _log(f'    v{i}: SKIP degenerate angle={angle_deg:.1f}')
-            continue
-
-        # Max radius so tangent length stays under 70% of shortest adjacent edge
-        max_radius = min_adj * 0.7 * half_tan
-        radius = min(corner_radius, max_radius)
-        if radius < 1e-4:
-            _log(f'    v{i}: SKIP radius too small r={radius:.6f} angle={angle_deg:.1f} edges=({len_e1:.4f},{len_e2:.4f})')
-            continue
-
-        line1 = line_refs[i]
-        line2 = line_refs[(i + 1) % n]
-        # Pick points near the shared vertex (10% along each edge from vertex)
-        # This ensures points stay on the line even after previous fillets trim edges
-        t = 0.1
-        pick1 = adsk.core.Point3D.create(
-            x2 + (x1 - x2) * t, y2 + (y1 - y2) * t, 0)
-        pick2 = adsk.core.Point3D.create(
-            x2 + (x3 - x2) * t, y2 + (y3 - y2) * t, 0)
-        try:
-            arc = arcs.addFillet(line1, pick1, line2, pick2, radius)
-            if arc:
-                _log(f'    v{i}: OK radius={radius:.4f} angle={angle_deg:.1f} edges=({len_e1:.4f},{len_e2:.4f})')
-            else:
-                _log(f'    v{i}: NONE radius={radius:.4f} angle={angle_deg:.1f} edges=({len_e1:.4f},{len_e2:.4f})')
-        except Exception as e:
-            _log(f'    v{i}: FAIL radius={radius:.4f} angle={angle_deg:.1f} edges=({len_e1:.4f},{len_e2:.4f}) err={e}')
+        lines.addByTwoPoints(pt1, pt2)
 
 
 def get_face_boundary(face, sketch):
